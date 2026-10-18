@@ -1,0 +1,6 @@
+# Resources of the RSA accelerator (PA1-R RTL), Yosys synth_xilinx for 7-series.
+read_verilog -sv synth/RSA_core_synth.v   # = rtl/patched/RSA_core.v with the original t[] clear loop (Yosys has no assignment patterns)
+read_verilog -sv rtl/patched/RSA_mark03_slave_lite_v1_0_S00_AXI.v
+hierarchy -top RSA_mark03_slave_lite_v1_0_S00_AXI -chparam RSA_WIDTH 2048
+synth_xilinx -family xc7 -flatten -top RSA_mark03_slave_lite_v1_0_S00_AXI
+tee -o logs/synth-rsa-pa1r.stat stat

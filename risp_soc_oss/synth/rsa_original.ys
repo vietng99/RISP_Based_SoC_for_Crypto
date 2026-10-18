@@ -1,0 +1,6 @@
+# Resources of the ORIGINAL RSA accelerator (ip_repo, before PA1), same flow as rsa_baseline.ys.
+read_verilog -sv ../RISP_SoC_6projects/RISP/ip_repo/acc_rsa/src/RSA_core.v
+read_verilog -sv ../RISP_SoC_6projects/RISP/ip_repo/acc_rsa/hdl/RSA_mark03_slave_lite_v1_0_S00_AXI.v
+hierarchy -top RSA_mark03_slave_lite_v1_0_S00_AXI -chparam RSA_WIDTH 2048
+synth_xilinx -family xc7 -flatten -top RSA_mark03_slave_lite_v1_0_S00_AXI
+tee -o logs/synth-rsa-original.stat stat

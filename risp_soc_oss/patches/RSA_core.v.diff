@@ -1,0 +1,192 @@
+--- ../RISP_SoC_6projects/RISP/ip_repo/acc_rsa/src/RSA_core.v	2026-10-13 22:09:08.000000000 +0700
++++ rtl/patched/RSA_core.v	2026-10-14 17:10:26.198795449 +0700
+@@ -1,3 +1,9 @@
++// PATCHED COPY of RISP/ip_repo/acc_rsa/src/RSA_core.v.
++// Changes are marked [risp_soc_oss patch] / [PA1]; see patches/RSA_core.v.diff.
++//   [risp_soc_oss patch] whole-array clear of t[] (Verilator 5.022).
++//   [PA1] fast_pub input: public-exponent flow, 18 MonMul for e = 65537
++//         (design: risp_soc_oss/RSA_PA1_DESIGN.md). fast_pub = 0 runs the
++//         original flow cycle for cycle.
+ `timescale 1ns / 1ps
+ //============================================================================
+ //  RSA Montgomery core (module `rsa`)
+@@ -23,6 +29,20 @@
+ //     CONST_TIME=1 : 2*E_SCAN + 3      (E_SCAN=17 -> 37)
+ //     CONST_TIME=0 : E_SCAN + popcount(E) + 3
+ //
++//  [PA1] fast_pub=1 (and E != 0), any E, NOT constant time - public
++//  exponents only:  A = MonMul(M,R2) = M*R ; res = A
++//     for i = L-1 downto 1: res = MonMul(res,res); if E[i]: res = MonMul(res,A)
++//     res = MonMul(res,res); C = E[0] ? MonMul(res,M) : MonMul(res,1)
++//  L = index of the top set bit of E. MonMul count: 2 + L + popcount(E[L-1:1])
++//  (2 when E = 1)
++//  (e = 65537 -> 18). The last multiply uses plain M, so the factor R
++//  cancels and no separate conversion out of Montgomery form is needed
++//  (same as OpenTitan sigverify mod_exp_ibex.c). E = 0 runs the original flow.
++//
++//  [PA1-R] E is latched at start (e_r), so writing E while an operation
++//  runs no longer changes that operation. busy = 1 from the cycle after
++//  start until done.
++//
+ //  CONST_TIME=1 always performs the multiplication and only commits the
+ //  result conditionally, so the run time does not depend on the exponent.
+ //  E_SCAN is the number of exponent bits scanned (17 for e = 65537).
+@@ -46,13 +66,15 @@
+     input  wire              clk,
+     input  wire              rst,
+     input  wire              start,
++    input  wire              fast_pub,  // [PA1] 1 = public-exponent flow (not constant time)
+     input  wire [WIDTH-1:0]  M,
+     input  wire [E_BITS-1:0] E,
+     input  wire [WIDTH-1:0]  N,
+     input  wire [WIDTH-1:0]  N_INV,     // chi N_INV[WORD-1:0] duoc dung
+     input  wire [WIDTH-1:0]  R2_MOD_N,
+     output reg  [WIDTH-1:0]  C,
+-    output reg               done
++    output reg               done,
++    output wire              busy       // [PA1-R] 1 while an operation runs
+ );
+     //------------------------------------------------------------------
+     // Bo nho toan hang (cat tu cong rong luc start)
+@@ -107,18 +129,23 @@
+                ST_L1E   = 4'd3,  ST_M     = 4'd4,  ST_L2F   = 4'd5,
+                ST_L2    = 4'd6,  ST_L2E   = 4'd7,  ST_NEXT  = 4'd8,
+                ST_SUB   = 4'd9,  ST_CMP   = 4'd10, ST_WR    = 4'd11,
+-               ST_CPY   = 4'd12, ST_EXP_A = 4'd13, ST_EXP_B = 4'd14;
++               ST_CPY   = 4'd12, ST_EXP_A = 4'd13, ST_EXP_B = 4'd14,
++               ST_MSB   = 4'd15;                   // [PA1] find top set bit of E
+ 
+     reg [3:0] st;
+     reg [5:0] ebit_idx;
+     reg       ebit;
+     reg [2:0] phase;    // 0=convM 1=convR 2=square 3=mult 4=final
++    reg       fast_r;   // [PA1] latched fast_pub && E != 0
++    reg [E_BITS-1:0] e_r;   // [PA1-R] E latched at start
++
++    assign busy = (st != ST_IDLE);
+ 
+     always @(posedge clk) begin
+         if (rst) begin
+             st <= ST_IDLE; done <= 1'b0; C <= {WIDTH{1'b0}};
+             carry <= 0; ii <= 0; jj <= 0; phase <= 0;
+-            ebit_idx <= 0; borrow <= 0; ebit <= 0;
++            ebit_idx <= 0; borrow <= 0; ebit <= 0; fast_r <= 1'b0;
+         end else begin
+             done <= 1'b0;
+ 
+@@ -131,15 +158,31 @@
+                     r2  [k] <= R2_MOD_N[k*WORD +: WORD];
+                 end
+                 n0inv_r  <= N_INV[WORD-1:0];
+-                ebit_idx <= E_SCAN[5:0] - 6'd1;
+                 phase    <= 3'd0;
+                 sel_a    <= 3'd4;  sel_b <= 3'd5;      // MonMul(M, R2)
+-                st       <= ST_CLR;
++                // [PA1] fast flow scans E from bit E_BITS-1 down in ST_MSB
++                fast_r   <= fast_pub && (E != {E_BITS{1'b0}});
++                e_r      <= E;                         // [PA1-R]
++                if (fast_pub && (E != {E_BITS{1'b0}})) begin
++                    ebit_idx <= E_BITS[5:0] - 6'd1;
++                    st       <= ST_MSB;
++                end else begin
++                    ebit_idx <= E_SCAN[5:0] - 6'd1;
++                    st       <= ST_CLR;
++                end
++            end
++
++            // [PA1] stop at the top set bit (E != 0 here, so this ends)
++            ST_MSB: begin
++                if (e_r[ebit_idx]) st <= ST_CLR;
++                else             ebit_idx <= ebit_idx - 6'd1;
+             end
+ 
+             //------------------- CIOS -------------------------------
+             ST_CLR: begin
+-                for (k = 0; k <= S+1; k = k + 1) t[k] <= {WORD{1'b0}};
++                // [risp_soc_oss patch] whole-array clear; same effect as the original
++                // for-loop of NBAs, which Verilator 5.022 rejects (BLKLOOPINIT).
++                t <= '{default: {WORD{1'b0}}};
+                 ii <= 0; jj <= 0; carry <= 0;
+                 b_i   <= rd_src(sel_b, 0);
+                 mac_y <= rd_src(sel_a, 0);
+@@ -253,7 +296,10 @@
+             //--------------- copy tmpv -> dich ----------------------
+             ST_CPY: begin
+                 case (phase)
+-                    3'd0: mbar[jj] <= tmpv[jj];                  // M_bar
++                    3'd0: begin                                  // M_bar
++                        mbar[jj] <= tmpv[jj];
++                        if (fast_r) res[jj] <= tmpv[jj];         // [PA1] res = M*R
++                    end
+                     3'd1: res [jj] <= tmpv[jj];                  // res = R mod N
+                     3'd2: res [jj] <= tmpv[jj];                  // binh phuong
+                     3'd3: res [jj] <= ebit ? tmpv[jj] : res[jj]; // nhan (co dk)
+@@ -264,7 +310,42 @@
+             end
+ 
+             //--------------- dieu khien luy thua --------------------
+-            ST_EXP_A: begin
++            ST_EXP_A: if (fast_r) begin
++                // [PA1] public-exponent flow; ebit_idx = bit handled by this square
++                case (phase)
++                3'd0: begin                                  // res = M*R, ebit_idx = L
++                    if (ebit_idx == 0) begin                 // E = 1
++                        phase <= 3'd4;
++                        sel_a <= 3'd0; sel_b <= 3'd3;        // MonMul(res, 1)
++                    end else begin
++                        ebit_idx <= ebit_idx - 6'd1;
++                        ebit     <= e_r[ebit_idx - 6'd1];
++                        phase    <= 3'd2;
++                        sel_a <= 3'd0; sel_b <= 3'd0;        // MonMul(res,res)
++                    end
++                    st <= ST_CLR;
++                end
++                3'd2: begin                                  // squared for bit ebit_idx
++                    if (ebit_idx == 0) begin
++                        phase <= 3'd4;
++                        sel_a <= 3'd0;
++                        sel_b <= ebit ? 3'd4 : 3'd3;         // MonMul(res, M) / MonMul(res, 1)
++                        st    <= ST_CLR;
++                    end else if (ebit) begin
++                        phase <= 3'd3;
++                        sel_a <= 3'd0; sel_b <= 3'd1;        // MonMul(res,M_bar)
++                        st    <= ST_CLR;
++                    end else st <= ST_EXP_B;
++                end
++                3'd3: st <= ST_EXP_B;
++                default: begin                               // phase 4: done
++                    for (k = 0; k < S; k = k + 1)
++                        C[k*WORD +: WORD] <= res[k];
++                    done <= 1'b1;
++                    st   <= ST_IDLE;
++                end
++                endcase
++            end else begin
+                 case (phase)
+                 3'd0: begin                                  // xong conv M
+                     phase <= 3'd1;
+@@ -273,7 +354,7 @@
+                 end
+                 3'd1: begin                                  // xong conv R
+                     phase <= 3'd2;
+-                    ebit  <= E[ebit_idx];
++                    ebit  <= e_r[ebit_idx];
+                     sel_a <= 3'd0; sel_b <= 3'd0;            // MonMul(res,res)
+                     st    <= ST_CLR;
+                 end
+@@ -295,13 +376,14 @@
+             end
+ 
+             ST_EXP_B: begin
++                // [PA1] fast flow never gets here with ebit_idx == 0 (bit 0 ends in ST_EXP_A)
+                 if (ebit_idx == 0) begin
+                     phase <= 3'd4;
+                     sel_a <= 3'd0; sel_b <= 3'd3;            // MonMul(res, 1)
+                     st    <= ST_CLR;
+                 end else begin
+                     ebit_idx <= ebit_idx - 6'd1;
+-                    ebit     <= E[ebit_idx - 6'd1];
++                    ebit     <= e_r[ebit_idx - 6'd1];
+                     phase    <= 3'd2;
+                     sel_a <= 3'd0; sel_b <= 3'd0;
+                     st    <= ST_CLR;

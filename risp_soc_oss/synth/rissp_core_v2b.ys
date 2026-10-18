@@ -1,0 +1,4 @@
+# [t-027] Area of the RISSP v2b CPU (rtl/cores/rissp_v2b, per-type blocks), Xilinx 7-series mapping, defaults (JAL_LINK=0, ILLEGAL_HALT=0).
+read_verilog rtl/cores/rissp_v2b/rissp_top.v rtl/cores/rissp_v2b/fetch_stage.v rtl/cores/rissp_v2b/register_file.v rtl/cores/rissp_v2b/modular_ex.v rtl/cores/rissp_v2b/alu_adder.v rtl/cores/rissp_v2b/u_type_block.v rtl/cores/rissp_v2b/i_type_block.v rtl/cores/rissp_v2b/r_type_block.v rtl/cores/rissp_v2b/s_type_block.v rtl/cores/rissp_v2b/b_type_block.v rtl/cores/rissp_v2b/j_type_block.v rtl/cores/rissp_v2b/axi_rissp_master.v
+synth_xilinx -family xc7 -top rissp_top -flatten
+tee -o logs/synth-rissp_v2b-stat.txt stat

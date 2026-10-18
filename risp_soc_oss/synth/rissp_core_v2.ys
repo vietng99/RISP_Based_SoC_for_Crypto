@@ -1,0 +1,5 @@
+# [t-021] Area of the RISSP v2 CPU (rtl/cores/rissp_v2), Xilinx 7-series mapping, JAL_LINK=0 (default).
+read_verilog rtl/cores/rissp_v2/rissp_top_v2.v
+synth_xilinx -family xc7 -top rissp_top -flatten
+tee -o logs/synth-rissp_v2-stat.txt stat
+tee -o logs/synth-rissp_v2-ltp.txt ltp -noff

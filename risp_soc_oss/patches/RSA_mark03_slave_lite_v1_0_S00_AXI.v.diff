@@ -1,0 +1,114 @@
+--- ../RISP_SoC_6projects/RISP/ip_repo/acc_rsa/hdl/RSA_mark03_slave_lite_v1_0_S00_AXI.v	2026-10-13 22:09:08.000000000 +0700
++++ rtl/patched/RSA_mark03_slave_lite_v1_0_S00_AXI.v	2026-10-14 17:13:25.824032349 +0700
+@@ -1,3 +1,11 @@
++// PATCHED COPY of RISP/ip_repo/acc_rsa/hdl/RSA_mark03_slave_lite_v1_0_S00_AXI.v.
++// [PA1] CTRL bit1 = fast_pub (public-exponent flow in RSA_core.v, not constant
++// time). Writing CTRL = 0x1 runs the original flow; 0x3 runs the fast flow.
++// [PA1-R] STATUS bit1 = busy (an operation runs or waits to start). A start
++// written while busy is queued (one deep) and runs when the current one ends;
++// its operands are taken when it actually starts. STATUS.done is cleared by
++// the CTRL start write and set only by the operation that write asked for.
++// See patches/RSA_mark03_slave_lite_v1_0_S00_AXI.v.diff.
+ `timescale 1ns / 1ps
+ //============================================================================
+ //  RSA (Montgomery) AXI4-Lite slave  --  ban RONG, ho tro toan hang tuy y
+@@ -15,7 +23,8 @@
+ //    0x300           W   E              so mu cong khai (65537)
+ //    0x304           W   N_INV          -N^-1 mod 2^32 (1 tu)
+ //    0x308           W   CTRL           bit0 = start (xung 1 chu ky)
+-//    0x30C           R   STATUS         bit0 = done
++//                                       bit1 = fast_pub [PA1] (giu toi lan ghi CTRL sau)
++//    0x30C           R   STATUS         bit0 = done, bit1 = busy [PA1-R]
+ //    0x400 - 0x4FC   R   RESULT[0..S-1] C = M^E mod N
+ //
+ //  Voi S=64 (2048-bit) thi 0x000-0x0FC la dung 64 tu. Voi WIDTH nho hon,
+@@ -110,6 +119,10 @@
+     reg [31:0] r2_arr[0:S-1];
+     reg [31:0] r_e, r_ninv;
+     reg        core_start, core_rst;
++    reg        core_fast;            // [PA1] CTRL bit1
++    reg        start_pending;        // [PA1-R] start written while busy
++    wire       core_busy;
++    wire       core_active = core_busy | core_start;
+ 
+     localparam [3:0] PG_M = 4'h0, PG_N = 4'h1, PG_R2 = 4'h2,
+                      PG_CTL = 4'h3, PG_RES = 4'h4;
+@@ -123,13 +136,19 @@
+     always @(posedge S_AXI_ACLK) begin
+         if (!S_AXI_ARESETN) begin
+             r_e<=32'h0; r_ninv<=32'h0;
+-            core_start<=1'b0; core_rst<=1'b1;
++            core_start<=1'b0; core_rst<=1'b1; core_fast<=1'b0;
++            start_pending<=1'b0;
+             for (q=0; q<S; q=q+1) begin
+                 m_arr[q]<=32'h0; n_arr[q]<=32'h0; r2_arr[q]<=32'h0;
+             end
+         end else begin
+             core_start <= 1'b0;      // start la xung 1 chu ky
+             core_rst   <= 1'b0;
++            // [PA1-R] launch a queued start once the core is idle
++            if (start_pending && !core_active) begin
++                core_start    <= 1'b1;
++                start_pending <= 1'b0;
++            end
+             if (write_pulse) begin
+                 case (wpage)
+                     PG_M:  if (widx < S) m_arr [widx] <= wdata_reg;
+@@ -138,7 +157,16 @@
+                     PG_CTL: case (awaddr_reg[7:0])
+                                 OFF_E:    r_e    <= wdata_reg;
+                                 OFF_NINV: r_ninv <= wdata_reg;
+-                                OFF_CTRL: core_start <= wdata_reg[0];
++                                OFF_CTRL: begin
++                                    core_fast  <= wdata_reg[1];   // [PA1]
++                                    // [PA1-R] start now if idle, else queue it
++                                    if (wdata_reg[0]) begin
++                                        if (core_active || start_pending)
++                                            start_pending <= 1'b1;
++                                        else
++                                            core_start    <= 1'b1;
++                                    end
++                                end
+                                 default:  ;
+                             endcase
+                     default: ;
+@@ -165,18 +193,25 @@
+ 
+     rsa #(.WIDTH(RSA_WIDTH), .E_BITS(32),
+           .CONST_TIME(RSA_CONST_TIME), .E_SCAN(RSA_E_SCAN)) u_rsa (
+-        .clk(S_AXI_ACLK), .rst(core_rst), .start(core_start),
++        .clk(S_AXI_ACLK), .rst(core_rst), .start(core_start), .fast_pub(core_fast),
+         .M(m_bus), .E(r_e), .N(n_bus),
+         .N_INV({{(RSA_WIDTH-32){1'b0}}, r_ninv}), .R2_MOD_N(r2_bus),
+-        .C(core_c), .done(core_done)
++        .C(core_c), .done(core_done), .busy(core_busy)
+     );
+ 
++    // [PA1-R] busy covers the cycle of core_done too: done_latch is set one
++    // cycle after core_done, and STATUS must never read done=0, busy=0 mid-op.
++    wire status_busy = core_active | start_pending | core_done;
++
+     // done latch: giu done=1 cho toi khi start moi
+     reg done_latch;
+     always @(posedge S_AXI_ACLK) begin
+         if (!S_AXI_ARESETN) done_latch<=1'b0;
+-        else if (core_start) done_latch<=1'b0;
+-        else if (core_done)  done_latch<=1'b1;
++        // [PA1-R] clear on the CTRL start write; ignore the done of an
++        // operation that was already running when a new start was queued
++        else if (write_pulse && wpage == PG_CTL && awaddr_reg[7:0] == OFF_CTRL
++                 && wdata_reg[0])          done_latch<=1'b0;
++        else if (core_done && !start_pending) done_latch<=1'b1;
+     end
+ 
+     //--------------------------------------------------------------
+@@ -193,7 +228,8 @@
+         else if (ar_received) begin
+             case (rpage)
+                 PG_CTL: axi_rdata <= (araddr_reg[7:0] == OFF_STATUS)
+-                                     ? {31'b0, done_latch} : 32'h0;
++                                     ? {30'b0, status_busy, done_latch}
++                                     : 32'h0;
+                 PG_RES: axi_rdata <= (ridx < S) ? core_c[rbase +: 32] : 32'h0;
+                 default: axi_rdata <= 32'h0;
+             endcase

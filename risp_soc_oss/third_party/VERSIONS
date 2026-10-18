@@ -1,0 +1,3 @@
+axi           https://github.com/pulp-platform/axi           v0.39.11  42ca270ebd8bbbc1c64ddc0ca712e722eb9e3f06
+common_cells  https://github.com/pulp-platform/common_cells  v1.39.0   9ca8a7655f741e7dd5736669a20a301325194c28
+cva6          https://github.com/openhwgroup/cva6            v5.3.0    2ef1c1b1fca419354920c5487293bc605294904e  (submodules: core/cvfpu, core/cvfpu/src/fpu_div_sqrt_mvp, core/cache_subsystem/hpdcache)
