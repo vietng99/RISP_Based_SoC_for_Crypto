@@ -1,0 +1,4 @@
+# [t-022] Area of the Ibex CPU block used in the Ibex SoC (ibex_axi_top), Xilinx 7-series mapping.
+read_verilog -sv -DSYNTHESIS -I../ip_repo/cpu_ibex/ip_repo/src ../ip_repo/cpu_ibex/ip_repo/src/ibex_axi_top_combined.sv 
+synth_xilinx -family xc7 -top ibex_axi_top -flatten
+tee -o logs/synth-ibex-stat.txt stat

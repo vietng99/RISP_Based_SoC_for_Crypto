@@ -1,0 +1,5 @@
+# [t-019] Baseline area of the original RISSP CPU (RISP/ip_repo/cpu_rissp), Xilinx 7-series mapping.
+read_verilog ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/alu_adder.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/axi_rissp_master.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/b_type_block.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/barrel_shifter.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/comparator.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/fetch_stage.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/i_type_block.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/j_type_block.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/modular_ex.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/r_type_block.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/register_file.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/rissp_top.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/s_type_block.v ../RISP_SoC_6projects/RISP/ip_repo/cpu_rissp/src/u_type_block.v
+synth_xilinx -family xc7 -top rissp_top -flatten
+tee -o logs/synth-rissp_orig-stat.txt stat
+tee -o logs/synth-rissp_orig-ltp.txt ltp -noff

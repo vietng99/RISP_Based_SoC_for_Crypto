@@ -1,0 +1,15 @@
+# Vivado project output, created next to each socs/<name>/create_project.tcl
+socs/*/*_soc.*
+socs/*/.Xil/
+socs/*/*.log
+socs/*/*.jou
+socs/*/*.txt
+
+# Vivado run files written to the directory Vivado was started from
+.Xil/
+vivado*.log
+vivado*.jou
+vivado*.str
+*.backup.log
+*.backup.jou
+webtalk*
